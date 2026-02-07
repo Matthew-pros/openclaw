@@ -1,0 +1,16 @@
+name: Run Clawdbot
+on:
+  schedule:
+    - cron: '*/30 * * * *'  # Každých 30 min
+  workflow_dispatch:
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with: { node-version: 22 }
+    - run: npm ci
+    - run: npm install -g clawdbot@latest
+    - run: clawdbot onboard --cloud  # Nebo tvůj příkaz
+    - run: clawdbot agent  # Spusť úlohu
