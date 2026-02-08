@@ -36,10 +36,4 @@ jobs:
       env:
         # Předpokládám, že používáš DISCORD_TOKEN a případně další proměnné
         DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-        # Další environment variables, které bot potřebuje
-        # NAPIŠ_ZDE_DALSI_PROMENNE: ${{ secrets.NAPIŠ_ZDE_DALSI_PROMENNE }}
-
-    # Poznámka: Tento krok (Run ClawdBot) bude běžet, dokud nedokončí (tj. dokud bot nepadne nebo nedojde k timeoutu).
-
-  # Pokud chceš mít větší kontrolu, můžeš přidat krok, který by monitoroval, zda bot běží, a pokud ne, tak ho restartoval.
-  # To by ale vyžadovalo, aby byl bot schopen komunikovat s nějakým externím systémem, což je v rámci jednoho jobu obtížné.
+    
