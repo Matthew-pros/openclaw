@@ -1,24 +1,45 @@
-- name: Generate package-lock.json if missing
-  run: |
-    if [ ! -f package-lock.json ]; then
-      npm install --package-lock-only
-    fi
+name: Run ClawdBot 24/7
 
-- name: Run npm ci
-  run: npm ci
-  
 on:
+  push:
+    branches: [ main ]
   schedule:
-    - cron: '*/30 * * * *'  # Každých 30 min
-  workflow_dispatch:
+    # Spustí každých 5 hodin a 50 minut (aby se předešlo timeoutu 6 hodin)
+    - cron: '50 */5 * * *'
+
 jobs:
-  run:
+  run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 360  # 6 hodin, maximální povolená doba
+
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-node@v4
-      with: { node-version: 22 }
-    - run: npm ci
-    - run: npm install -g clawdbot@latest
-    - run: clawdbot onboard --cloud  # Nebo tvůj příkaz
-    - run: clawdbot agent  # Spusť úlohu
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+
+    - name: Generate package-lock.json if missing
+      run: |
+        if [ ! -f package-lock.json ]; then
+          npm install --package-lock-only --no-audit
+        fi
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Run ClawdBot
+      run: npm start
+      env:
+        # Předpokládám, že používáš DISCORD_TOKEN a případně další proměnné
+        DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+        # Další environment variables, které bot potřebuje
+        # NAPIŠ_ZDE_DALSI_PROMENNE: ${{ secrets.NAPIŠ_ZDE_DALSI_PROMENNE }}
+
+    # Poznámka: Tento krok (Run ClawdBot) bude běžet, dokud nedokončí (tj. dokud bot nepadne nebo nedojde k timeoutu).
+
+  # Pokud chceš mít větší kontrolu, můžeš přidat krok, který by monitoroval, zda bot běží, a pokud ne, tak ho restartoval.
+  # To by ale vyžadovalo, aby byl bot schopen komunikovat s nějakým externím systémem, což je v rámci jednoho jobu obtížné.
