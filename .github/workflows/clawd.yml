@@ -1,15 +1,195 @@
+name: ClawdBot 24/7 Runner
+
+on:
+  push:
+    branches: [ main, master ]
+  
+  workflow_dispatch:
+  
+  schedule:
+    - cron: '*/5 * * * *'
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: false
+    
+    timeout-minutes: 360
+    
+    steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
+    
     - name: Generate lockfile if missing
       run: |
+        # Pokud žádný lock soubor neexistuje, vytvoř package-lock.json
         if [ ! -f package-lock.json ] && [ ! -f yarn.lock ] && [ ! -f npm-shrinkwrap.json ]; then
           echo "Generating package-lock.json..."
           npm install --package-lock-only --no-audit
+        else
+          echo "Lock file already exists."
         fi
-
+    
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
         node-version: '18'
         cache: 'npm'
+    
+    - name: Install dependencies
+      run: |
+        # Nyní by měl existovat lock soubor, takže můžeme použít npm ci
+        npm ci --no-audit --prefer-offline
+    
+    - name: Create .env file
+      run: |
+        echo "Creating .env file..."
+        cat > .env <<EOF
+        DISCORD_BOT_TOKEN=${{ secrets.DISCORD_BOT_TOKEN }}
+        TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}
+        OPENROUTER_API_KEY=${{ secrets.OPENROUTER_API_KEY }}
+        EOF
+        
+        echo ".env file created with 3 environment variables"
+    
+    - name: Create keep-alive script
+      run: |
+        cat > keep_alive.js <<'EOF'
+        // Keep-alive script pro ClawdBot
+        const { exec } = require('child_process');
+        const fs = require('fs');
+        const path = require('path');
+        
+        console.log('🚀 Starting ClawdBot 24/7...');
+        
+        // Zkontroluj package.json pro startovací script
+        let packageJson = {};
+        try {
+          packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          console.log('📄 Found package.json, scripts:', JSON.stringify(packageJson.scripts, null, 2));
+        } catch (err) {
+          console.log('⚠️  Could not read package.json:', err.message);
+        }
+        
+        // Urči spouštěcí příkaz
+        const startCommand = packageJson.scripts && packageJson.scripts.start 
+          ? 'npm start' 
+          : 'node index.js || node bot.js || node main.js || node src/index.js || node dist/index.js';
+        
+        console.log(`🎯 Using start command: ${startCommand}`);
+        
+        // Spuštění bota
+        const botProcess = exec(startCommand, {
+          stdio: 'pipe',
+          shell: true,
+          cwd: process.cwd()
+        });
+        
+        // Logování s časovými značkami
+        const logWithTime = (prefix, data) => {
+          const timestamp = new Date().toISOString();
+          const lines = data.toString().split('\n').filter(line => line.trim());
+          lines.forEach(line => {
+            console.log(`[${timestamp}] ${prefix} ${line}`);
+          });
+        };
+        
+        botProcess.stdout.on('data', (data) => {
+          logWithTime('🤖', data);
+          
+          const message = data.toString().toLowerCase();
+          if (message.includes('disconnected') || 
+              message.includes('rate limit') ||
+              message.includes('connection closed') ||
+              message.includes('econnrefused') ||
+              message.includes('failed to connect') ||
+              message.includes('error') && !message.includes('success')) {
+            console.log('⚠️  Detected potential issue, will monitor...');
+          }
+        });
+        
+        botProcess.stderr.on('data', (data) => {
+          logWithTime('❌', data);
+          
+          const errorMsg = data.toString().toLowerCase();
+          if (errorMsg.includes('fatal') || 
+              errorMsg.includes('unhandled rejection') ||
+              errorMsg.includes('uncaught exception') ||
+              errorMsg.includes('token invalid') ||
+              errorMsg.includes('authentication failed')) {
+            console.log('🚨 Critical error detected, scheduling restart in 30 seconds...');
+            setTimeout(() => {
+              console.log('♻️  Restarting due to critical error...');
+              botProcess.kill('SIGTERM');
+              process.exit(1);
+            }, 30000);
+          }
+        });
+        
+        botProcess.on('close', (code, signal) => {
+          console.log(`🔴 Bot process exited with code ${code} and signal ${signal}`);
+          
+          const restartDelays = [5000, 10000, 30000, 60000];
+          const restartCount = parseInt(process.env.RESTART_COUNT || '0');
+          const delay = restartDelays[Math.min(restartCount, restartDelays.length - 1)];
+          
+          console.log(`🔄 Restarting in ${delay/1000} seconds (attempt ${restartCount + 1})...`);
+          
+          setTimeout(() => {
+            console.log('♻️  Attempting to restart bot...');
+            process.exit(1);
+          }, delay);
+        });
+        
+        const shutdown = () => {
+          console.log('🛑 Received shutdown signal, stopping bot...');
+          botProcess.kill('SIGTERM');
+          
+          setTimeout(() => {
+            if (botProcess.exitCode === null) {
+              console.log('⚠️  Bot did not exit gracefully, forcing...');
+              botProcess.kill('SIGKILL');
+            }
+            process.exit(0);
+          }, 10000);
+        };
+        
+        process.on('SIGTERM', shutdown);
+        process.on('SIGINT', shutdown);
+        
+        setInterval(() => {
+          const now = new Date();
+          console.log(`💓 Heartbeat - ClawdBot running at ${now.toISOString()}`);
+          
+          fs.writeFileSync('/tmp/clawdbot_status.json', JSON.stringify({
+            status: 'running',
+            last_heartbeat: now.toISOString(),
+            uptime: process.uptime(),
+            memory: process.memoryUsage()
+          }, null, 2));
+        }, 120000);
+        
+        console.log('✅ Keep-alive script initialized and running');
+        EOF
+    
+    - name: Run ClawdBot
+      run: |
+        echo "🚀 Launching ClawdBot..."
+        echo "Current directory: $(pwd)"
+        echo "Node version: $(node --version)"
+        echo "NPM version: $(npm --version)"
+        
+        node keep_alive.js
+      
+      env:
+        RESTART_COUNT: 0
+        NODE_ENV: production
+    
+    - name: Cleanup on failure
+      if: failure()
+      run: |
+        echo "🧹 Cleaning up after failure..."
+        echo "Workflow failed - check logs above for details"
