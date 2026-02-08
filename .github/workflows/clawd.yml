@@ -1,4 +1,12 @@
-name: Run Clawdbot
+- name: Generate package-lock.json if missing
+  run: |
+    if [ ! -f package-lock.json ]; then
+      npm install --package-lock-only
+    fi
+
+- name: Run npm ci
+  run: npm ci
+  
 on:
   schedule:
     - cron: '*/30 * * * *'  # Každých 30 min
